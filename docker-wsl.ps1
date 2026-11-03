@@ -522,20 +522,43 @@ function Request-Reinicio {
     [void](Invoke-Nativo -Arquivo 'shutdown.exe' -Argumentos @('/r', '/t', '60', '/c', 'docker-wsl: reinício para ativar o WSL2. Para cancelar, rode: shutdown /a') -Silencioso)
 }
 
+function Get-VersaoWsl {
+    $r = Invoke-Wsl -Argumentos @('--version') -Capturar
+    if ($r.Codigo -eq 0 -and $r.Saida.Count -gt 0 -and $r.Saida[0] -match '(\d+\.\d+\.\d+(\.\d+)?)') { return $Matches[1] }
+    return $null
+}
+
 function Update-Wsl {
-    Write-Info 'Atualizando o WSL (pode levar alguns minutos)...'
-    $r = Invoke-Wsl -Argumentos @('--update') -Silencioso
-    if ($r.Codigo -ne 0) {
-        Write-Aviso 'A atualização pela Microsoft Store falhou; tentando baixar direto do GitHub...'
-        $r = Invoke-Wsl -Argumentos @('--update', '--web-download') -Silencioso
-    }
-    if ($r.Codigo -ne 0) {
-        Write-Aviso "Não consegui atualizar o WSL (código $($r.Codigo)). Vou continuar com a versão atual."
-    }
-    $versao = Invoke-Wsl -Argumentos @('--version') -Capturar
-    if ($versao.Codigo -eq 0 -and $versao.Saida.Count -gt 0 -and $versao.Saida[0] -match '(\d+\.\d+\.\d+(\.\d+)?)') {
-        Write-Ok "WSL versão $($Matches[1])."
-        Add-Resumo "WSL atualizado (versão $($Matches[1]))"
+    $versao = Get-VersaoWsl
+    $recursos = Get-RecursosWsl
+    $completo = $versao -and $recursos.Location -and $recursos.Name -and $recursos.Move -and $recursos.Usuario -and $recursos.Versao
+    if ($completo) {
+        Write-Ok "WSL versão ${versao}: já tem tudo o que o script usa, então não vou atualizar."
+    } else {
+        $atualizar = $true
+        $rodando = @(Get-DistrosEmExecucao)
+        if ($rodando.Count -gt 0) {
+            Write-Aviso "O WSL precisa ser atualizado, e isso desliga as distros que estão rodando: $($rodando -join ', ')."
+            $atualizar = $false
+            if (-not $Silent) { $atualizar = Read-SimNao 'Atualizar o WSL agora?' $false }
+            if (-not $atualizar) { Write-Info 'Vou continuar com a versão atual; o script usa alternativas quando falta algum recurso.' }
+        }
+        if ($atualizar) {
+            Write-Info 'Atualizando o WSL (pode levar alguns minutos)...'
+            $r = Invoke-Wsl -Argumentos @('--update') -Silencioso
+            if ($r.Codigo -ne 0) {
+                Write-Aviso 'A atualização pela Microsoft Store falhou; tentando baixar direto do GitHub...'
+                $r = Invoke-Wsl -Argumentos @('--update', '--web-download') -Silencioso
+            }
+            if ($r.Codigo -ne 0) {
+                Write-Aviso "Não consegui atualizar o WSL (código $($r.Codigo)). Vou continuar com a versão atual."
+            }
+            $novaVersao = Get-VersaoWsl
+            if ($novaVersao) {
+                Write-Ok "WSL versão $novaVersao."
+                if ($novaVersao -ne $versao) { Add-Resumo "WSL atualizado para a versão $novaVersao" }
+            }
+        }
     }
     [void](Invoke-Wsl -Argumentos @('--set-default-version', '2') -Silencioso)
     Write-Ok 'WSL2 definido como versão padrão.'
@@ -589,7 +612,7 @@ function Initialize-Ambiente {
         Request-Reinicio -Estado $EstadoRetomada
         return $false
     }
-    Write-Etapa 'Atualizando o WSL e definindo o WSL2 como padrão'
+    Write-Etapa 'Verificando a versão do WSL e definindo o WSL2 como padrão'
     Update-Wsl
     [void](Test-DockerDesktop)
     return $true
@@ -917,6 +940,7 @@ function Move-WslDistro {
     $usarMove = $recursos.Move -and $info.Versao -eq 2
     # O "wsl --manage --move" só funciona com o WSL inteiro desligado (wsl --shutdown).
     $outras = @(Get-DistrosEmExecucao | Where-Object { $_ -ne $Nome -and $Script:RodandoNoInicio -contains $_ })
+    Write-Log "Mover: outras distros da pessoa rodando agora: $(if ($outras.Count) { $outras -join ', ' } else { 'nenhuma' })"
     if ($usarMove -and $outras.Count -gt 0) {
         $usarMove = $false
         if (-not $Silent) {
@@ -1541,6 +1565,7 @@ function Main {
     }
     if (-not (Request-Elevacao -Parametros $Script:Parametros)) { return }
     $Script:RodandoNoInicio = @(Get-DistrosEmExecucao)
+    Write-Log "Distros rodando no início: $(if ($Script:RodandoNoInicio.Count) { $Script:RodandoNoInicio -join ', ' } else { 'nenhuma' })"
 
     $janelaNova = [bool]($Retomar -or $Elevado)
     if ($Retomar) {

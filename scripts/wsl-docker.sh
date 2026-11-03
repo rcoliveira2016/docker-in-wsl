@@ -182,6 +182,11 @@ install_debian() {
     log "Atualizando a lista de pacotes..."
     apt-get update -q || fail "falha no apt-get update. Verifique a conexão com a internet."
     apt-get install -y -q ca-certificates curl || fail "não consegui instalar ca-certificates e curl."
+    if ! curl -fsI "https://download.docker.com/linux/$REPO/dists/$CODENAME/Release" >/dev/null 2>&1; then
+        case "$REPO" in ubuntu) alt=noble ;; *) alt=trixie ;; esac
+        log "O Docker ainda não publicou pacotes para '$CODENAME'; vou usar os de '$alt'."
+        CODENAME=$alt
+    fi
     log "Adicionando o repositório oficial do Docker ($REPO $CODENAME)..."
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL "https://download.docker.com/linux/$REPO/gpg" -o /etc/apt/keyrings/docker.asc || fail "não consegui baixar a chave do repositório do Docker."

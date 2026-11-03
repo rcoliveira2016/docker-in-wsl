@@ -75,7 +75,7 @@ Se você abrir o script no Windows PowerShell 5.1 e o PowerShell 7 estiver insta
 1. Confere a versão do Windows e se a virtualização está ligada.
 2. Habilita a **Plataforma de Máquina Virtual**, se ainda não estiver habilitada. O recurso antigo **Subsistema do Windows para Linux** só é habilitado quando o WSL da Microsoft Store não está instalado.
 3. Só pede para reiniciar quando um desses recursos acabou de ser habilitado. Nesse caso, **ele pergunta antes** (o padrão é "Não"). Se você recusar, nada é reiniciado: reinicie quando quiser e rode o script de novo, que ele pergunta se quer continuar de onde parou. No modo `-Silent`, ele nunca reinicia e termina com o código `3010`.
-4. Atualiza o WSL (`wsl --update`) e define o WSL2 como padrão. Toda distro criada, importada ou movida pelo script é WSL2.
+4. Confere a versão do WSL e só roda `wsl --update` se faltar algum recurso que o script usa. Como atualizar o WSL desliga as distros que estão rodando, ele pergunta antes quando alguma estiver ligada; no modo `-Silent`, não atualiza nesse caso. Também define o WSL2 como padrão. Toda distro criada, importada ou movida pelo script é WSL2.
 5. Instala a distro escolhida (Ubuntu, Debian ou Alpine) no disco que você escolher, com o seu usuário Linux.
 6. Habilita o systemd no `/etc/wsl.conf` (no Alpine, configura a inicialização automática pelo OpenRC).
 7. Instala o **Docker Engine pelo repositório oficial**, o **Compose v2** e o **Buildx**.
