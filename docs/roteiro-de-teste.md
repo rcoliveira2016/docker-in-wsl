@@ -21,7 +21,12 @@ cd docker-in-wsl
 wsl --list --verbose > antes.txt          # foto das distros antes dos testes
 ```
 
-Tenha um segundo disco ou partição (ex.: `D:`) com pelo menos 10 GB livres.
+**Tudo no D:.** Os testes na sua máquina não criam nada no C:. Todas as distros, backups e pastas de teste ficam em `D:\WSL\`, e por isso os casos sempre escolhem um local no D: em vez do "Padrão (C:)". O local padrão só é testado na VM (A3). Reserve uns **15 GB livres no D:**.
+
+No C: ficam só itens pequenos e inevitáveis:
+- os logs e a cópia do script em `%LOCALAPPDATA%\docker-wsl` (poucos MB);
+- a atualização do próprio WSL (`wsl --update`);
+- o download temporário do `wsl --install`, apagado ao final.
 
 **Verificador automático:**
 
@@ -63,6 +68,7 @@ Ele termina com código `0` quando tudo passa e lista o que falhou. Sem `-SemRei
 1. Na VM, rode o one-liner e escolha a opção **2**.
 2. Aceite a reinicialização.
 3. Faça login com o mesmo usuário.
+4. Quando chegar a pergunta do local, aceite o **Padrão (C:)**: é aqui que o local padrão do WSL é testado.
 
 **Esperado:**
 - As etapas `[1/4]` a `[3/4]` mostram que o Windows é compatível, que a virtualização está ativa e que os recursos foram habilitados "(requer reinicialização)".
@@ -122,9 +128,14 @@ Get-Help .\docker-wsl.ps1 -Full
 1. Crie uma distro em WSL1 a partir de outra:
 
    ```powershell
-   wsl --export Ubuntu-24.04 $env:TEMP\base.tar      # use qualquer distro que você tenha
-   wsl --import Teste-WSL1 D:\WSL\Teste-WSL1 $env:TEMP\base.tar --version 1
+   New-Item -ItemType Directory -Force D:\WSL | Out-Null
+   wsl --install -d Debian --name Teste-Base --location D:\WSL\Teste-Base --no-launch
+   wsl --export Teste-Base D:\WSL\base.tar
+   wsl --import Teste-WSL1 D:\WSL\Teste-WSL1 D:\WSL\base.tar --version 1
+   wsl --unregister Teste-Base
    ```
+
+   O `.tar` fica no D: e é removido na limpeza.
 
 2. Rode a opção **1**.
 
@@ -136,19 +147,19 @@ Get-Help .\docker-wsl.ps1 -Full
 
 ## C. Opção 2: instalar Docker em uma nova distro
 
-### C1. Ubuntu no local padrão (só apertando Enter)
+### C1. Ubuntu no D:, aceitando os demais padrões
 
-1. Opção **2**. Aperte Enter em tudo, menos no nome da distro: digite `Teste-Ubuntu`.
+1. Opção **2**. Aperte Enter em tudo, com duas exceções: no nome da distro, digite `Teste-Ubuntu`; no local, escolha `D:\WSL\Teste-Ubuntu`.
 2. Quando pedir, defina a senha do usuário Linux.
 
 **Esperado:**
 - As etapas numeradas vão de `[1/6]` até `[6/6]` e terminam com "O Docker funcionou: o container hello-world rodou sem sudo."
-- O resumo mostra a distro, o caminho do disco em `%LOCALAPPDATA%\wsl\...`, o usuário e os próximos passos.
+- O resumo mostra a distro, o caminho `D:\WSL\Teste-Ubuntu\ext4.vhdx`, o usuário e os próximos passos.
 
 **Verificação:**
 
 ```powershell
-.\tests\verificar.ps1 -Distro Teste-Ubuntu -Usuario <seu_usuario_em_minusculas>
+.\tests\verificar.ps1 -Distro Teste-Ubuntu -LocalEsperado D:\WSL\Teste-Ubuntu -Usuario <seu_usuario_em_minusculas>
 ```
 
 - [ ] Passou
@@ -201,7 +212,7 @@ Na opção **2**, digite valores inválidos e confira se o script recusa e pergu
 
 ### C5. Comando `docker` no Windows
 
-1. Opção **2** → nome `Teste-Win` → responda **S** a "Quer usar o comando docker direto no PowerShell/CMD do Windows?".
+1. Opção **2** → nome `Teste-Win` → local `D:\WSL\Teste-Win` → responda **S** a "Quer usar o comando docker direto no PowerShell/CMD do Windows?".
 2. Abra um **novo** terminal.
 
 **Esperado:** `docker ps` e `docker run --rm hello-world` funcionam no PowerShell e no CMD. `Get-Command docker` aponta para `%LOCALAPPDATA%\docker-wsl\bin\docker.cmd`.
@@ -247,7 +258,7 @@ Na opção **2**, digite valores inválidos e confira se o script recusa e pergu
 1. Crie uma distro sem usuário comum:
 
    ```powershell
-   wsl --install -d Debian --name Teste-Existente --no-launch
+   wsl --install -d Debian --name Teste-Existente --location D:\WSL\Teste-Existente --no-launch
    ```
 
 2. Opção **3**.
@@ -283,8 +294,8 @@ Na opção **2**, digite valores inválidos e confira se o script recusa e pergu
 
 ### D3. Mover antes de instalar
 
-1. Crie outra distro sem Docker: `wsl --install -d Ubuntu --name Teste-Mover3 --no-launch`.
-2. Opção **3** → `Teste-Mover3` → responda **S** para mover → escolha `D:\WSL\Teste-Mover3`.
+1. Crie outra distro sem Docker, numa pasta "de origem" no D:: `wsl --install -d Ubuntu --name Teste-Mover3 --location D:\WSL\Origem\Teste-Mover3 --no-launch`.
+2. Opção **3** → `Teste-Mover3` → responda **S** para mover → escolha "Outra pasta" → `D:\WSL\Teste-Mover3`.
 
 **Esperado:** a etapa "Movendo a distro" roda antes da instalação do Docker.
 
@@ -318,18 +329,18 @@ Na opção **2**, digite valores inválidos e confira se o script recusa e pergu
    wsl -d Teste-Ubuntu -- sh -c "echo marcador > ~/marcador.txt; docker pull alpine; docker volume create teste-vol"
    ```
 
-2. Opção **4** → `Teste-Ubuntu` → `D:\WSL\Teste-Ubuntu` → confirme.
+2. Opção **4** → `Teste-Ubuntu` (hoje em `D:\WSL\Teste-Ubuntu`) → "Outra pasta" → `D:\WSL\Movidas\Teste-Ubuntu` → confirme.
 
 **Esperado:**
 - Antes de mover, o script mostra a origem, o destino, o espaço livre e o espaço necessário.
 - Ele avisa que a distro será desligada e pede confirmação.
-- No fim aparece "Distro 'Teste-Ubuntu' movida para D:\WSL\Teste-Ubuntu".
+- No fim aparece "Distro 'Teste-Ubuntu' movida para D:\WSL\Movidas\Teste-Ubuntu".
 
 **Verificação:**
 
 ```powershell
 wsl -d Teste-Ubuntu -- sh -c "cat ~/marcador.txt; docker image ls alpine; docker volume ls"
-.\tests\verificar.ps1 -Distro Teste-Ubuntu -LocalEsperado D:\WSL\Teste-Ubuntu
+.\tests\verificar.ps1 -Distro Teste-Ubuntu -LocalEsperado D:\WSL\Movidas\Teste-Ubuntu
 ```
 
 O `marcador.txt`, a imagem `alpine` e o volume `teste-vol` continuam lá, e o usuário padrão não virou root.
@@ -355,7 +366,7 @@ O `marcador.txt`, a imagem `alpine` e o volume `teste-vol` continuam lá, e o us
 
 ### E4. Espaço insuficiente *(opcional)*
 
-1. Crie um disco pequeno de 1 GB no Gerenciamento de Disco (Ação → Criar VHD → 1 GB, inicialize e formate como `X:`).
+1. Crie um disco pequeno de 1 GB no Gerenciamento de Disco: Ação → Criar VHD, salve o arquivo em `D:\WSL\pequeno.vhdx`, inicialize e formate como `X:`.
 2. Opção **4** → `Teste-Ubuntu` → "Outra pasta" → `X:\WSL\Teste-Ubuntu`.
 
 **Esperado:** aparece "Espaço insuficiente em X:\..." antes de desligar ou alterar a distro.
@@ -456,7 +467,7 @@ Na saída, "Dados em /var/lib/docker" deve aparecer como **apagados**.
 
 ### G2. Sem internet no meio da instalação
 
-1. Opção **2** → nome `Teste-Rede`. Desligue a rede (Wi-Fi/cabo) assim que aparecer a etapa "Instalando Docker Engine...".
+1. Opção **2** → nome `Teste-Rede` → local `D:\WSL\Teste-Rede`. Desligue a rede (Wi-Fi/cabo) assim que aparecer a etapa "Instalando Docker Engine...".
 
 **Esperado:** o script para com uma mensagem clara, por exemplo "falha no apt-get update. Verifique a conexão com a internet.", e aponta o log.
 
@@ -468,7 +479,7 @@ Na saída, "Dados em /var/lib/docker" deve aparecer como **apagados**.
 
 ### G3. Interromper com Ctrl+C
 
-1. Opção **2** → nome `Teste-Ctrl`. Aperte Ctrl+C durante a instalação do Docker.
+1. Opção **2** → nome `Teste-Ctrl` → local `D:\WSL\Teste-Ctrl`. Aperte Ctrl+C durante a instalação do Docker.
 2. Rode `.\docker-wsl.ps1 -Acao InstalarExistente -Distro Teste-Ctrl`.
 
 **Esperado:** a segunda execução completa a instalação. Se o `apt` reclamar de lock, o erro aparece no log com a orientação.
@@ -517,7 +528,7 @@ Remova tudo o que os testes criaram:
 
 ```powershell
 wsl --list --quiet | Where-Object { $_ -like 'Teste-*' } | ForEach-Object { wsl --unregister $_.Trim() }
-Remove-Item -Recurse -Force D:\WSL\Teste-*, D:\WSL\Movida, D:\WSL\Ocupada -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force D:\WSL\Teste-*, D:\WSL\Movida, D:\WSL\Movidas, D:\WSL\Origem, D:\WSL\Ocupada, D:\WSL\base.tar -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $env:LOCALAPPDATA\docker-wsl -ErrorAction SilentlyContinue
 Unregister-ScheduledTask docker-wsl-retomar -Confirm:$false -ErrorAction SilentlyContinue
 wsl --list --verbose     # compare com o antes.txt
@@ -539,7 +550,7 @@ Se você usou o C5, tire também `%LOCALAPPDATA%\docker-wsl\bin` do `PATH` do us
 | A6 Ajuda | | |
 | B1 Tabela | | |
 | B2 WSL1 | | |
-| C1 Ubuntu padrão | | |
+| C1 Ubuntu no D: | | |
 | C2 Debian em D: | | |
 | C3 Alpine | | |
 | C4 Validações | | |
