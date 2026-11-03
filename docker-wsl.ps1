@@ -87,6 +87,7 @@ $Script:StepAtual    = 0
 $Script:StepTotal    = 0
 $Script:WslRecursos  = $null
 $Script:ScriptLinux  = $null
+$Script:CodigoSaida  = 0
 $Script:Resumo       = New-Object System.Collections.Generic.List[string]
 
 $Script:Catalogo = [ordered]@{
@@ -347,7 +348,7 @@ function Get-ScriptLinux {
 }
 
 function Format-ArgumentosElevacao {
-    param([hashtable]$Parametros)
+    param([hashtable]$Parametros, [switch]$SemAspas)
     $lista = @()
     foreach ($chave in $Parametros.Keys) {
         $valor = $Parametros[$chave]
@@ -355,10 +356,32 @@ function Format-ArgumentosElevacao {
             if ([bool]$valor) { $lista += "-$chave" }
         } elseif ("$valor" -ne '') {
             $lista += "-$chave"
-            $lista += '"' + ("$valor" -replace '"', '') + '"'
+            if ($SemAspas) { $lista += "$valor" } else { $lista += '"' + ("$valor" -replace '"', '') + '"' }
         }
     }
     return $lista
+}
+
+function Get-PowerShellPreferido {
+    $pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($pwsh) { return $pwsh.Source }
+    return (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')
+}
+
+function Request-PowerShell7 {
+    param([hashtable]$Parametros)
+    if ($PSVersionTable.PSVersion.Major -ge 7) { return $true }
+    $exe = Get-PowerShellPreferido
+    if ($exe -notmatch 'pwsh\.exe$') {
+        Write-Aviso 'PowerShell 7 não encontrado; vou usar o Windows PowerShell 5.1. Para instalar o 7: winget install Microsoft.PowerShell'
+        return $true
+    }
+    $caminho = $PSCommandPath
+    if (-not $caminho) { $caminho = Copy-ScriptParaAppDir }
+    Write-Info 'Abrindo no PowerShell 7...'
+    & $exe -NoProfile -ExecutionPolicy Bypass -File $caminho @(Format-ArgumentosElevacao $Parametros -SemAspas)
+    $Script:CodigoSaida = $LASTEXITCODE
+    return $false
 }
 
 function Request-Elevacao {
@@ -366,7 +389,7 @@ function Request-Elevacao {
     if (Test-Administrador) { return $true }
     Write-Aviso 'Este script precisa de permissão de administrador. Vou abrir uma nova janela elevada (confirme no aviso do Windows).'
     $caminho = Copy-ScriptParaAppDir
-    $exe = (Get-Process -Id $PID).Path
+    $exe = Get-PowerShellPreferido
     $argumentos = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$caminho`"") + @(Format-ArgumentosElevacao $Parametros) + @('-Elevado')
     try {
         Start-Process -FilePath $exe -ArgumentList $argumentos -Verb RunAs | Out-Null
@@ -407,12 +430,20 @@ function Test-Virtualizacao {
         'Depois rode o script novamente.')
 }
 
+function Test-WslDaLoja {
+    $r = Invoke-Wsl -Argumentos @('--version') -Capturar
+    return ($r.Codigo -eq 0 -and ($r.Saida -join ' ') -match '\d+\.\d+\.\d+')
+}
+
 function Enable-RecursosWindows {
     $precisaReiniciar = $false
-    $recursos = @(
-        @{ Nome = 'Microsoft-Windows-Subsystem-Linux'; Descricao = 'Subsistema do Windows para Linux' },
-        @{ Nome = 'VirtualMachinePlatform';            Descricao = 'Plataforma de Máquina Virtual' }
-    )
+    $recursos = @(@{ Nome = 'VirtualMachinePlatform'; Descricao = 'Plataforma de Máquina Virtual' })
+    # O WSL da Microsoft Store traz o próprio subsistema; o recurso antigo do Windows só é necessário sem ele.
+    if (Test-WslDaLoja) {
+        Write-Ok 'WSL da Microsoft Store instalado (o recurso antigo "Subsistema do Windows para Linux" não é necessário).'
+    } else {
+        $recursos = @(@{ Nome = 'Microsoft-Windows-Subsystem-Linux'; Descricao = 'Subsistema do Windows para Linux' }) + $recursos
+    }
     foreach ($recurso in $recursos) {
         $estado = Get-CimInstance -ClassName Win32_OptionalFeature -Filter "Name='$($recurso.Nome)'"
         if ($estado -and $estado.InstallState -eq 1) {
@@ -427,24 +458,22 @@ function Enable-RecursosWindows {
             default { throw "Não consegui habilitar $($recurso.Descricao) (código $($resultado.Codigo)). Veja o log: $Script:LogFile" }
         }
     }
-    if (-not $precisaReiniciar -and (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')) {
-        $teste = Invoke-Wsl -Argumentos @('--status') -Silencioso
-        if ($teste.Codigo -ne 0) { $precisaReiniciar = $true }
-    }
     return $precisaReiniciar
 }
 
 function Save-EstadoRetomada {
-    param([hashtable]$Estado)
+    param([hashtable]$Estado, [switch]$AgendarTarefa)
     New-Item -ItemType Directory -Force -Path $Script:AppDir | Out-Null
     $Estado | ConvertTo-Json | Set-Content -Path $Script:StateFile -Encoding UTF8
+    Write-Log "Estado salvo para retomar: $($Estado | ConvertTo-Json -Compress)"
+    if (-not $AgendarTarefa) { return }
     $caminho = Copy-ScriptParaAppDir
-    $exe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $exe = Get-PowerShellPreferido
     $acao = New-ScheduledTaskAction -Execute $exe -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$caminho`" -Retomar"
     $gatilho = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
     $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
     Register-ScheduledTask -TaskName $Script:TaskName -Action $acao -Trigger $gatilho -Principal $principal -Force | Out-Null
-    Write-Log "Retomada agendada: $($Estado | ConvertTo-Json -Compress)"
+    Write-Log 'Retomada agendada para o próximo login.'
 }
 
 function Get-EstadoRetomada {
@@ -459,6 +488,15 @@ function Get-EstadoRetomada {
     }
 }
 
+function Get-UltimoBoot {
+    return (Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime.ToString('yyyyMMddHHmmss')
+}
+
+function Test-ReinicioPendente {
+    $estado = Get-EstadoRetomada
+    return [bool]($estado -and $estado['Boot'] -and "$($estado['Boot'])" -eq (Get-UltimoBoot))
+}
+
 function Clear-EstadoRetomada {
     Remove-Item -Path $Script:StateFile -Force -ErrorAction SilentlyContinue
     try { Unregister-ScheduledTask -TaskName $Script:TaskName -Confirm:$false -ErrorAction Stop } catch { }
@@ -466,16 +504,21 @@ function Clear-EstadoRetomada {
 
 function Request-Reinicio {
     param([hashtable]$Estado)
-    Save-EstadoRetomada -Estado $Estado
     Write-Host ''
-    Write-Aviso 'O Windows precisa reiniciar para ativar o WSL2.'
-    Write-Info 'Depois do reinício, faça login com o mesmo usuário: o script abre sozinho e continua de onde parou.'
-    if (Read-SimNao 'Reiniciar agora?' $true) {
-        Write-Log 'Reiniciando o Windows.'
-        Restart-Computer -Force
-    } else {
-        Write-Info 'Reinicie quando puder. A instalação continua automaticamente no próximo login.'
+    Write-Aviso 'Para ativar o WSL2, o Windows precisa reiniciar. Nada foi reiniciado.'
+    $reiniciar = $false
+    if (-not $Silent) { $reiniciar = Read-SimNao 'Quer reiniciar agora?' $false }
+    $Estado['Boot'] = Get-UltimoBoot
+    Save-EstadoRetomada -Estado $Estado -AgendarTarefa:$reiniciar
+    $Script:CodigoSaida = 3010
+    if (-not $reiniciar) {
+        Write-Info 'Reinicie quando for melhor para você e rode o script de novo: ele pergunta se quer continuar de onde parou.'
+        return
     }
+    Write-Info 'Depois do reinício, faça login com o mesmo usuário: o script abre sozinho e continua de onde parou.'
+    Write-Aviso 'O Windows reinicia em 60 segundos. Salve o que estiver aberto. Para cancelar, rode: shutdown /a'
+    Write-Log 'Reinício confirmado pelo usuário (shutdown /r /t 60).'
+    [void](Invoke-Nativo -Arquivo 'shutdown.exe' -Argumentos @('/r', '/t', '60', '/c', 'docker-wsl: reinício para ativar o WSL2. Para cancelar, rode: shutdown /a') -Silencioso)
 }
 
 function Update-Wsl {
@@ -506,6 +549,7 @@ function Get-RecursosWsl {
         Name     = $ajuda -match '--name\b'
         Move     = $ajuda -match '--move'
         NoLaunch = $ajuda -match '--no-launch'
+        Versao   = $ajuda -match '--version <'
     }
     Write-Log "Recursos do WSL: $($Script:WslRecursos | ConvertTo-Json -Compress)"
     return $Script:WslRecursos
@@ -528,6 +572,11 @@ function Test-DockerDesktop {
 function Initialize-Ambiente {
     param([hashtable]$EstadoRetomada)
     Write-Titulo 'Preparando o Windows'
+    if (Test-ReinicioPendente) {
+        Write-Aviso 'O WSL2 já foi habilitado, mas o Windows ainda não foi reiniciado. Reinicie quando for melhor para você e rode o script de novo.'
+        $Script:CodigoSaida = 3010
+        return $false
+    }
     Start-Etapas 4
     Write-Etapa 'Verificando a versão do Windows'
     Test-VersaoWindows
@@ -921,7 +970,8 @@ function Move-PorExportacao {
     $r = Invoke-Wsl -Argumentos @('--unregister', $Info.Nome) -Silencioso
     if ($r.Codigo -ne 0) { throw "Não consegui remover o registro antigo. O backup está em $tar." }
     Write-Info 'Importando no novo local...'
-    $r = Invoke-Wsl -Argumentos @('--import', $Info.Nome, $Destino, $tar, '--version', "$($Info.Versao)")
+    if ($Info.Versao -eq 1) { Write-Info 'A distro estava em WSL1 e será importada como WSL2.' }
+    $r = Invoke-Wsl -Argumentos @('--import', $Info.Nome, $Destino, $tar, '--version', '2')
     if ($r.Codigo -ne 0) {
         throw "A importação falhou. Seus dados estão salvos em $tar. Para restaurar: wsl --import $($Info.Nome) `"$Destino`" `"$tar`""
     }
@@ -1100,6 +1150,7 @@ function Install-DistroNova {
         if (Get-Distro -Nome $Nome) { throw "Já existe uma distro chamada '$Nome'." }
     }
     $argumentos = @('--install', '-d', $online, '--no-launch')
+    if ($recursos.Versao) { $argumentos += @('--version', '2') }
     if ($recursos.Name) { $argumentos += @('--name', $Nome) }
     $moverDepois = $false
     if ($Pasta) {
@@ -1374,13 +1425,13 @@ function Invoke-Desinstalar {
 function Get-ParametrosAtuais {
     return @{
         Acao           = $Script:AcaoAtual
-        Distro         = $Distro
-        Nome           = $Nome
-        Local          = $Local
-        Usuario        = $Usuario
-        Mover          = [bool]$Mover
-        ComandoWindows = [bool]$ComandoWindows
-        Silent         = [bool]$Silent
+        Distro         = $Script:Distro
+        Nome           = $Script:Nome
+        Local          = $Script:Local
+        Usuario        = $Script:Usuario
+        Mover          = [bool]$Script:Mover
+        ComandoWindows = [bool]$Script:ComandoWindows
+        Silent         = [bool]$Script:Silent
     }
 }
 
@@ -1397,9 +1448,9 @@ function Restore-Parametros {
 }
 
 function Invoke-Acao {
-    param([string]$Nome)
-    $Script:AcaoAtual = $Nome
-    switch ($Nome) {
+    param([string]$Operacao)
+    $Script:AcaoAtual = $Operacao
+    switch ($Operacao) {
         'Listar'            { Invoke-Listar }
         'Instalar'          { Invoke-InstalarNova }
         'InstalarExistente' { Invoke-InstalarExistente }
@@ -1433,7 +1484,7 @@ function Show-Menu {
             continue
         }
         try {
-            Invoke-Acao -Nome $acoes[$n - 1]
+            Invoke-Acao -Operacao $acoes[$n - 1]
         } catch {
             Write-Host ''
             Write-Erro $_.Exception.Message
@@ -1447,6 +1498,10 @@ function Show-Menu {
 function Main {
     Initialize-Console
     Initialize-Log
+    if (-not (Request-PowerShell7 -Parametros $Script:Parametros)) {
+        if ($PSCommandPath -and $Script:CodigoSaida) { exit $Script:CodigoSaida }
+        return
+    }
     if (-not (Request-Elevacao -Parametros $Script:Parametros)) { return }
 
     $janelaNova = [bool]($Retomar -or $Elevado)
@@ -1456,9 +1511,9 @@ function Main {
         if (-not $estado) { Write-Aviso 'Não há tarefa pendente para retomar.'; Wait-Enter; return }
         Restore-Parametros -Estado $estado
         Write-Info 'Retomando a instalação depois da reinicialização...'
-    } elseif ((Test-Path $Script:StateFile) -and -not $Silent) {
+    } elseif ((Test-Path $Script:StateFile) -and -not (Test-ReinicioPendente)) {
         $estado = Get-EstadoRetomada
-        if ($estado -and (Read-SimNao 'Há uma instalação interrompida por reinicialização. Retomar agora?' $true)) {
+        if (-not $Silent -and $estado -and (Read-SimNao 'Há uma instalação interrompida por reinicialização. Retomar agora?' $true)) {
             Restore-Parametros -Estado $estado
         }
         Clear-EstadoRetomada
@@ -1469,7 +1524,7 @@ function Main {
             Show-Menu
         } else {
             if (-not $Silent) { Show-Banner }
-            Invoke-Acao -Nome $Acao
+            Invoke-Acao -Operacao $Acao
             if ($janelaNova) { Wait-Enter }
         }
     } catch {
@@ -1478,8 +1533,9 @@ function Main {
         Write-Log ($_ | Out-String) 'ERRO'
         Write-Info "Detalhes no log: $Script:LogFile"
         if ($janelaNova) { Wait-Enter }
-        if ($Silent -and $PSCommandPath) { exit 1 }
+        $Script:CodigoSaida = 1
     }
+    if ($Silent -and $PSCommandPath -and $Script:CodigoSaida) { exit $Script:CodigoSaida }
 }
 
 #endregion

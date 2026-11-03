@@ -2,7 +2,7 @@
 
 Instale e gerencie o **Docker Engine** direto numa distro Linux do **WSL2**, sem o Docker Desktop. Este repositório tem:
 
-- um **script PowerShell** (`docker-wsl.ps1`) que faz tudo por você, com menu, perguntas com valores padrão e retomada automática após reiniciar o Windows;
+- um **script PowerShell** (`docker-wsl.ps1`) que faz tudo por você, com menu e perguntas com valores padrão. Ele nunca reinicia o Windows sem perguntar;
 - um **passo a passo manual**, para quem quer entender cada etapa ou fazer sem o script;
 - um **guia de solução de problemas** com os erros mais comuns.
 
@@ -52,28 +52,30 @@ O que você deixa de ter: a interface gráfica, as Docker Extensions e o Kuberne
 
 ## Instalação rápida
 
-Abra o **PowerShell** e rode:
+Abra o **PowerShell 7** (`pwsh`) e rode:
 
 ```powershell
 irm https://raw.githubusercontent.com/rcoliveira2016/docker-in-wsl/main/install.ps1 | iex
 ```
 
-O `install.ps1` baixa a versão mais recente do script para `%LOCALAPPDATA%\docker-wsl` e a executa. O script abre o menu. Se o PowerShell não estiver como administrador, ele mesmo pede a elevação (confirme no aviso do Windows) e continua numa nova janela. Escolha a opção **2** e aperte Enter nas perguntas para aceitar os padrões.
+O `install.ps1` baixa a versão mais recente do script para `%LOCALAPPDATA%\docker-wsl` e a executa no PowerShell 7. Se o 7 não estiver instalado, ele usa o Windows PowerShell 5.1, que também funciona. Para instalar o 7: `winget install Microsoft.PowerShell`. O script abre o menu. Se o PowerShell não estiver como administrador, ele mesmo pede a elevação (confirme no aviso do Windows) e continua numa nova janela. Escolha a opção **2** e aperte Enter nas perguntas para aceitar os padrões.
 
 Prefere baixar antes de executar? Clone o repositório:
 
 ```powershell
 git clone https://github.com/rcoliveira2016/docker-in-wsl.git
 cd docker-in-wsl
-powershell -ExecutionPolicy Bypass -File .\docker-wsl.ps1
+pwsh -ExecutionPolicy Bypass -File .\docker-wsl.ps1
 ```
+
+Se você abrir o script no Windows PowerShell 5.1 e o PowerShell 7 estiver instalado, ele se reabre sozinho no 7.
 
 ### O que o script faz
 
 1. Confere a versão do Windows e se a virtualização está ligada.
-2. Habilita o **Subsistema do Windows para Linux** e a **Plataforma de Máquina Virtual**, se ainda não estiverem habilitados.
-3. Se for preciso reiniciar, ele avisa, agenda a própria retomada e continua sozinho depois do login.
-4. Atualiza o WSL (`wsl --update`) e define o WSL2 como padrão.
+2. Habilita a **Plataforma de Máquina Virtual**, se ainda não estiver habilitada. O recurso antigo **Subsistema do Windows para Linux** só é habilitado quando o WSL da Microsoft Store não está instalado.
+3. Só pede para reiniciar quando um desses recursos acabou de ser habilitado. Nesse caso, **ele pergunta antes** (o padrão é "Não"). Se você recusar, nada é reiniciado: reinicie quando quiser e rode o script de novo, que ele pergunta se quer continuar de onde parou. No modo `-Silent`, ele nunca reinicia e termina com o código `3010`.
+4. Atualiza o WSL (`wsl --update`) e define o WSL2 como padrão. Toda distro criada, importada ou movida pelo script é WSL2.
 5. Instala a distro escolhida (Ubuntu, Debian ou Alpine) no disco que você escolher, com o seu usuário Linux.
 6. Habilita o systemd no `/etc/wsl.conf` (no Alpine, configura a inicialização automática pelo OpenRC).
 7. Instala o **Docker Engine pelo repositório oficial**, o **Compose v2** e o **Buildx**.
@@ -424,7 +426,7 @@ Funciona com Ubuntu, Debian e Alpine. O script detecta a arquitetura.
 
 ## Testes
 
-O [roteiro de teste](docs/roteiro-de-teste.md) cobre todas as opções do menu, o modo silencioso, a retomada após reiniciar e os casos de erro. Depois de cada instalação, confira a distro com:
+O [roteiro de teste](docs/roteiro-de-teste.md) cobre todas as opções do menu, o modo silencioso, o pedido de reinício e os casos de erro. Depois de cada instalação, confira a distro com:
 
 ```powershell
 .\tests\verificar.ps1 -Distro Ubuntu -LocalEsperado D:\WSL\Ubuntu

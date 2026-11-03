@@ -20,6 +20,7 @@
         return
     }
 
-    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $powershell = Get-Command pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
+    if (-not $powershell) { $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
     & $powershell -NoProfile -ExecutionPolicy Bypass -File $script @args
 } @args

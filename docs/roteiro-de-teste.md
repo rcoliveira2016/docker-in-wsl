@@ -31,7 +31,7 @@ No C: ficam só itens pequenos e inevitáveis:
 **Verificador automático:**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tests\verificar.ps1 -Distro <nome> [-LocalEsperado <pasta>] [-Usuario <usuario>] [-ComandoWindows] [-SemDocker] [-SemReinicio]
+pwsh -ExecutionPolicy Bypass -File .\tests\verificar.ps1 -Distro <nome> [-LocalEsperado <pasta>] [-Usuario <usuario>] [-ComandoWindows] [-SemDocker] [-SemReinicio]
 ```
 
 Ele termina com código `0` quando tudo passa e lista o que falhou. Sem `-SemReinicio`, ele reinicia a distro para confirmar que o Docker sobe sozinho.
@@ -43,7 +43,7 @@ Ele termina com código `0` quando tudo passa e lista o que falhou. Sem `-SemRei
 ### A1. Elevação automática
 
 1. Abra o PowerShell **sem** "Executar como administrador".
-2. Rode `powershell -ExecutionPolicy Bypass -File .\docker-wsl.ps1`.
+2. Rode `pwsh -ExecutionPolicy Bypass -File .\docker-wsl.ps1`.
 
 **Esperado:** aparece o aviso de permissão do Windows (UAC). Depois de aceitar, abre uma nova janela com o banner e o menu. A janela original mostra "A execução continua na nova janela." e volta ao prompt.
 
@@ -76,25 +76,39 @@ Ele termina com código `0` quando tudo passa e lista o que falhou. Sem `-SemRei
 ### A3. Máquina sem WSL, com reinício e retomada *(VM limpa)*
 
 1. Na VM, rode o one-liner e escolha a opção **2**.
-2. Aceite a reinicialização.
+2. Na pergunta "Quer reiniciar agora? [s/N]", digite **S**.
 3. Faça login com o mesmo usuário.
 4. Quando chegar a pergunta do local, aceite o **Padrão (C:)**: é aqui que o local padrão do WSL é testado.
 
 **Esperado:**
 - As etapas `[1/4]` a `[3/4]` mostram que o Windows é compatível, que a virtualização está ativa e que os recursos foram habilitados "(requer reinicialização)".
-- O script pergunta "Reiniciar agora? [S/n]".
+- A pergunta de reinício tem **Não** como padrão. Depois do **S**, o Windows avisa que vai reiniciar em 60 segundos.
 - Depois do login, a janela do script abre sozinha, mostra "Retomando a instalação..." e continua para a escolha da distro.
 - Ao terminar, a tarefa `docker-wsl-retomar` não existe mais: `Get-ScheduledTask docker-wsl-retomar` dá erro.
 
 - [ ] Passou
 
-### A4. Retomada manual
+### A4. Recusar o reinício *(VM limpa)*
 
-1. Na VM, repita até o pedido de reinício e responda **N**.
-2. Reinicie pelo menu Iniciar, mas apague a tarefa antes do login seguinte: `Unregister-ScheduledTask docker-wsl-retomar -Confirm:$false`.
-3. Rode o script de novo.
+1. Na VM (restaurada para antes do A3), rode o script, escolha a opção **2** e, na pergunta de reinício, só aperte **Enter**.
+2. Rode o script de novo **sem reiniciar**.
+3. Reinicie pelo menu Iniciar, faça login e rode o script mais uma vez.
 
-**Esperado:** o script pergunta "Há uma instalação interrompida por reinicialização. Retomar agora?" e, com Enter, segue para a instalação.
+**Esperado:**
+- No passo 1, **o Windows não reinicia**. Aparece "Reinicie quando for melhor para você...", e nenhuma tarefa `docker-wsl-retomar` é criada.
+- No passo 2, o script avisa "O WSL2 já foi habilitado, mas o Windows ainda não foi reiniciado" e não tenta instalar.
+- No passo 3, ele pergunta "Há uma instalação interrompida por reinicialização. Retomar agora?" e, com Enter, segue para a instalação.
+
+- [ ] Passou
+
+### A7. Máquina com WSL funcionando nunca pede reinício *(sua máquina)*
+
+Este caso cobre uma regressão: numa máquina com o WSL da Microsoft Store, o script habilitava o recurso antigo "Subsistema do Windows para Linux" e reiniciava o Windows sem necessidade.
+
+1. Confira que o WSL da Store está instalado: `wsl --version` mostra a versão.
+2. Rode `.\docker-wsl.ps1 -Acao Instalar -Distro Alpine -Nome Teste-SemReinicio -Local D:\WSL -Usuario dev -Silent`.
+
+**Esperado:** a etapa `[3/4]` mostra "WSL da Microsoft Store instalado (o recurso antigo ... não é necessário)". **Nenhum** `dism` aparece no log, o Windows não reinicia e a instalação segue até o `hello-world`.
 
 - [ ] Passou
 
@@ -554,8 +568,9 @@ Se você usou o C5, tire também `%LOCALAPPDATA%\docker-wsl\bin` do `PATH` do us
 |---|---|---|
 | A1 Elevação | | |
 | A2 One-liner | | |
-| A3 Reinício e retomada | | |
-| A4 Retomada manual | | |
+| A3 Reinício aceito e retomada | | |
+| A4 Reinício recusado | | |
+| A7 Sem reinício desnecessário | | |
 | A5 Sem virtualização | | |
 | A6 Ajuda | | |
 | B1 Tabela | | |

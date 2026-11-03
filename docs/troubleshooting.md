@@ -91,17 +91,22 @@ A opção 3 do script oferece essa conversão automaticamente.
 A política de execução do PowerShell bloqueia scripts baixados. Rode assim:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\docker-wsl.ps1
+pwsh -ExecutionPolicy Bypass -File .\docker-wsl.ps1
 ```
 
 Ou desbloqueie o arquivo: `Unblock-File .\docker-wsl.ps1`. O one-liner com `irm ... | iex` não é afetado pela política.
 
+### O script diz que precisa reiniciar
+
+Isso só acontece quando ele acabou de habilitar a Plataforma de Máquina Virtual (ou, sem o WSL da Store, o Subsistema do Windows para Linux). O script **nunca reinicia sozinho**:
+
+- Se você respondeu **Não** (o padrão), nada foi reiniciado. Reinicie quando for melhor e rode o script de novo: ele pergunta se você quer continuar de onde parou. Enquanto o Windows não reiniciar, ele avisa e não tenta instalar.
+- Se você respondeu **Sim**, o Windows reinicia em 60 segundos (para cancelar, rode `shutdown /a`). Depois do login, a tarefa agendada `docker-wsl-retomar` abre o script e continua a instalação.
+- No modo `-Silent`, ele nunca reinicia e termina com o código `3010`.
+
 ### O script não continuou sozinho depois de reiniciar
 
-A retomada é uma tarefa agendada (`docker-wsl-retomar`) que roda no próximo login do mesmo usuário. Se ela não abriu:
-
-- rode o script de novo: ele detecta a instalação interrompida e pergunta se você quer retomar;
-- ou confira a tarefa em **Agendador de Tarefas → Biblioteca**.
+A retomada automática só é agendada quando você aceita reiniciar pelo script. Em qualquer caso, rode o script de novo: ele detecta a instalação interrompida e pergunta se você quer retomar.
 
 ### A janela elevada fechou e não vi o erro
 
