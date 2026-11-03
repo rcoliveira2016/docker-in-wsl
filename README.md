@@ -55,10 +55,10 @@ O que você deixa de ter: a interface gráfica, as Docker Extensions e o Kuberne
 Abra o **PowerShell** e rode:
 
 ```powershell
-irm https://raw.githubusercontent.com/rcoliveira2016/docker-in-wsl/main/docker-wsl.ps1 | iex
+irm https://raw.githubusercontent.com/rcoliveira2016/docker-in-wsl/main/install.ps1 | iex
 ```
 
-O script abre o menu. Se o PowerShell não estiver como administrador, ele mesmo pede a elevação (confirme no aviso do Windows) e continua numa nova janela. Escolha a opção **2** e aperte Enter nas perguntas para aceitar os padrões.
+O `install.ps1` baixa a versão mais recente do script para `%LOCALAPPDATA%\docker-wsl` e a executa. O script abre o menu. Se o PowerShell não estiver como administrador, ele mesmo pede a elevação (confirme no aviso do Windows) e continua numa nova janela. Escolha a opção **2** e aperte Enter nas perguntas para aceitar os padrões.
 
 Prefere baixar antes de executar? Clone o repositório:
 
@@ -98,7 +98,7 @@ Ele pode ser executado várias vezes sem quebrar nada: o que já está feito é 
 Com o one-liner, passe os parâmetros assim:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rcoliveira2016/docker-in-wsl/main/docker-wsl.ps1))) -Acao Instalar -Distro Debian -Silent
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rcoliveira2016/docker-in-wsl/main/install.ps1))) -Acao Instalar -Distro Debian -Local D:\WSL -Silent
 ```
 
 | Parâmetro | Descrição |
@@ -409,6 +409,7 @@ Funciona com Ubuntu, Debian e Alpine. O script detecta a arquitetura.
 
 ```text
 .
+├── install.ps1             # instalador do one-liner: baixa e executa o docker-wsl.ps1
 ├── docker-wsl.ps1          # script principal (menu, preparação do Windows, instalação, mover, desinstalar)
 ├── scripts/
 │   └── wsl-docker.sh       # executado dentro da distro: status, usuário, systemd, instalação e remoção do Docker

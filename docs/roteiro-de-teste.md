@@ -56,10 +56,20 @@ Ele termina com código `0` quando tudo passa e lista o que falhou. Sem `-SemRei
 1. Num PowerShell comum, rode:
 
    ```powershell
-   irm https://raw.githubusercontent.com/rcoliveira2016/docker-in-wsl/main/docker-wsl.ps1 | iex
+   irm https://raw.githubusercontent.com/rcoliveira2016/docker-in-wsl/main/install.ps1 | iex
    ```
 
-**Esperado:** igual ao A1. O script se baixa para `%LOCALAPPDATA%\docker-wsl`, junto com `scripts\wsl-docker.sh`, e abre elevado. A janela original **não** fecha.
+2. Repita no **Windows PowerShell 5.1** (`powershell.exe`) e no **PowerShell 7** (`pwsh.exe`).
+
+**Esperado:** igual ao A1, nas duas versões. Aparece "Baixando o docker-wsl...", o script e o `scripts\wsl-docker.sh` são baixados para `%LOCALAPPDATA%\docker-wsl`, e o script abre elevado **com os acentos corretos**. A janela original **não** fecha.
+
+**Variação com parâmetros:**
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rcoliveira2016/docker-in-wsl/main/install.ps1))) -Acao Listar
+```
+
+**Esperado:** abre direto a tabela da opção 1, sem passar pelo menu.
 
 - [ ] Passou
 
