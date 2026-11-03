@@ -1,0 +1,10 @@
+*.log
+logs/
+*.tar
+*.tar.gz
+*.vhdx
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
