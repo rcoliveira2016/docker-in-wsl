@@ -202,7 +202,10 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 ```sh
 apk add docker docker-cli-compose docker-cli-buildx openrc
 rc-update add docker default
+printf 'auto lo\niface lo inet loopback\n' >> /etc/network/interfaces
 ```
+
+A última linha é necessária porque o serviço `docker` do OpenRC depende do `networking`, que não sobe sem o `/etc/network/interfaces` (o minirootfs não traz esse arquivo).
 
 No Alpine não há systemd. Para o Docker subir junto com a distro, crie `/usr/local/sbin/wsl-docker-boot.sh`:
 
@@ -255,6 +258,8 @@ wsl --install -d Ubuntu --name Ubuntu-Docker --location D:\WSL\Ubuntu-Docker
 wsl --shutdown
 wsl --manage Ubuntu --move D:\WSL\Ubuntu
 ```
+
+O `--move` só funciona com o WSL inteiro desligado (`wsl --shutdown`); só desligar a distro com `--terminate` dá `ERROR_SHARING_VIOLATION`. O script cuida disso: se outras distros suas estiverem rodando, ele pergunta antes de desligá-las ou move por exportar/importar, sem mexer nelas.
 
 **Versões antigas do WSL, sem `--move`** (exportar e importar):
 

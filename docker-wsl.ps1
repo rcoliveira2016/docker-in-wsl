@@ -88,6 +88,7 @@ $Script:StepTotal    = 0
 $Script:WslRecursos  = $null
 $Script:ScriptLinux  = $null
 $Script:CodigoSaida  = 0
+$Script:RodandoNoInicio = @()
 $Script:Resumo       = New-Object System.Collections.Generic.List[string]
 
 $Script:Catalogo = [ordered]@{
@@ -550,6 +551,7 @@ function Get-RecursosWsl {
         Move     = $ajuda -match '--move'
         NoLaunch = $ajuda -match '--no-launch'
         Versao   = $ajuda -match '--version <'
+        Usuario  = $ajuda -match '--set-default-user'
     }
     Write-Log "Recursos do WSL: $($Script:WslRecursos | ConvertTo-Json -Compress)"
     return $Script:WslRecursos
@@ -913,6 +915,15 @@ function Move-WslDistro {
 
     $recursos = Get-RecursosWsl
     $usarMove = $recursos.Move -and $info.Versao -eq 2
+    # O "wsl --manage --move" só funciona com o WSL inteiro desligado (wsl --shutdown).
+    $outras = @(Get-DistrosEmExecucao | Where-Object { $_ -ne $Nome -and $Script:RodandoNoInicio -contains $_ })
+    if ($usarMove -and $outras.Count -gt 0) {
+        $usarMove = $false
+        if (-not $Silent) {
+            Write-Info "O método rápido (wsl --manage --move) exige desligar todo o WSL, e estas distros estão rodando: $($outras -join ', ')."
+            $usarMove = Read-SimNao 'Desligar todas para usar o método rápido? (Não = exportar/importar, mais lento, sem mexer nas outras)' $false
+        }
+    }
     $tamanho = $info.Tamanho
     if ($info.Versao -eq 1) {
         $tamanho = (Get-ChildItem -LiteralPath $info.Pasta -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
@@ -933,15 +944,20 @@ function Move-WslDistro {
         }
     }
 
-    Write-Info "Desligando a distro '$Nome'..."
-    [void](Invoke-Wsl -Argumentos @('--terminate', $Nome) -Silencioso)
-
     $movido = $false
     if ($usarMove) {
+        Write-Info 'Desligando o WSL (wsl --shutdown)...'
+        [void](Invoke-Wsl -Argumentos @('--shutdown') -Silencioso)
+        Start-Sleep -Seconds 2
         Write-Info 'Movendo com "wsl --manage --move" (pode levar alguns minutos)...'
         $r = Invoke-Wsl -Argumentos @('--manage', $Nome, '--move', $Destino)
         $movido = ($r.Codigo -eq 0)
         if (-not $movido) { Write-Aviso 'O "wsl --manage --move" falhou; vou usar exportar/importar.' }
+    } else {
+        Write-Info 'Vou mover por exportar/importar.'
+    }
+    if (-not $movido) {
+        Stop-Distro -Nome $Nome
     }
     if (-not $movido) {
         Move-PorExportacao -Info $info -Destino $Destino
@@ -954,6 +970,14 @@ function Move-WslDistro {
     Write-Ok "Distro '$Nome' movida para $Destino."
     Add-Resumo "Distro '$Nome' movida para $Destino"
     return $true
+}
+
+function Stop-Distro {
+    param([string]$Nome)
+    Write-Info "Desligando a distro '$Nome'..."
+    [void](Invoke-Wsl -Argumentos @('--terminate', $Nome) -Silencioso)
+    for ($i = 0; $i -lt 15 -and (Get-DistrosEmExecucao) -contains $Nome; $i++) { Start-Sleep -Seconds 1 }
+    Start-Sleep -Seconds 2
 }
 
 function Move-PorExportacao {
@@ -1021,10 +1045,23 @@ function New-UsuarioLinux {
     param([string]$Nome, [string]$Usuario)
     $r = Invoke-ScriptNaDistro -Nome $Nome -Comando 'user' -Argumentos @($Usuario)
     if ($r.Codigo -ne 0) { throw "Não consegui criar o usuário '$Usuario'. Veja o log: $Script:LogFile" }
-    $uid = Invoke-Wsl -Argumentos @('-d', $Nome, '-u', 'root', '--exec', 'id', '-u', $Usuario) -Capturar
-    $info = Get-Distro -Nome $Nome
-    if ($info -and $uid.Codigo -eq 0 -and $uid.Saida.Count -gt 0) {
-        Set-ItemProperty -Path (Join-Path $Script:LxssKey $info.Guid) -Name DefaultUid -Value ([int]$uid.Saida[-1]) -Type DWord
+    $definido = $false
+    if ((Get-RecursosWsl).Usuario) {
+        $definido = ((Invoke-Wsl -Argumentos @('--manage', $Nome, '--set-default-user', $Usuario) -Silencioso).Codigo -eq 0)
+    }
+    if (-not $definido) {
+        $uid = Invoke-Wsl -Argumentos @('-d', $Nome, '-u', 'root', '--exec', 'id', '-u', $Usuario) -Capturar
+        $info = Get-Distro -Nome $Nome
+        if ($info -and $uid.Codigo -eq 0 -and $uid.Saida.Count -gt 0) {
+            Set-ItemProperty -Path (Join-Path $Script:LxssKey $info.Guid) -Name DefaultUid -Value ([int]$uid.Saida[-1]) -Type DWord
+        }
+        [void](Invoke-Wsl -Argumentos @('--terminate', $Nome) -Silencioso)
+    }
+    $atual = (Invoke-Wsl -Argumentos @('-d', $Nome, '--exec', 'id', '-un') -Capturar).Saida
+    if ($atual -and $atual[-1].Trim() -eq $Usuario) {
+        Write-Ok "Usuário padrão da distro: $Usuario"
+    } else {
+        Write-Aviso "Não consegui confirmar o usuário padrão. Se a distro abrir como root, rode: wsl --manage $Nome --set-default-user $Usuario"
     }
     Set-SenhaUsuario -Nome $Nome -Usuario $Usuario
     Add-Resumo "Usuário Linux '$Usuario' configurado como padrão"
@@ -1503,6 +1540,7 @@ function Main {
         return
     }
     if (-not (Request-Elevacao -Parametros $Script:Parametros)) { return }
+    $Script:RodandoNoInicio = @(Get-DistrosEmExecucao)
 
     $janelaNova = [bool]($Retomar -or $Elevado)
     if ($Retomar) {

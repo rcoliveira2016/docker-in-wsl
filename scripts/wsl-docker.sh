@@ -198,6 +198,12 @@ install_alpine() {
     log "Instalando Docker Engine, Compose v2 e Buildx..."
     apk add docker docker-cli-compose docker-cli-buildx openrc || fail "falha ao instalar os pacotes do Docker."
     rc-update add docker default >/dev/null 2>&1
+    # O serviço docker do OpenRC depende do "networking", que falha sem /etc/network/interfaces.
+    if ! grep -Eqs '^[[:space:]]*iface[[:space:]]+lo([[:space:]]|$)' /etc/network/interfaces; then
+        mkdir -p /etc/network
+        printf 'auto lo\niface lo inet loopback\n' >> /etc/network/interfaces
+        log "Rede do OpenRC configurada (/etc/network/interfaces com loopback)."
+    fi
     mkdir -p "$(dirname "$BOOT_SCRIPT")"
     cat > "$BOOT_SCRIPT" <<'EOF'
 #!/bin/sh
@@ -246,11 +252,28 @@ use_iptables_legacy() {
     return 1
 }
 
+run_boot_alpine() {
+    "$BOOT_SCRIPT" 2>&1 | grep -v 'needs non existent service' | sed 's/^/    /'
+}
+
+start_alpine() {
+    [ -x "$BOOT_SCRIPT" ] || fail "não encontrei $BOOT_SCRIPT; rode a instalação de novo."
+    log "Iniciando o Docker pelo OpenRC..."
+    run_boot_alpine
+    i=0
+    while [ $i -lt 10 ] && ! docker_running; do sleep 1; i=$((i + 1)); done
+    docker_running && return 0
+    log "A primeira tentativa falhou; limpando o estado do OpenRC e tentando de novo..."
+    rc-service docker stop >/dev/null 2>&1
+    rm -rf /run/openrc
+    run_boot_alpine
+}
+
 cmd_start() {
     require_root
     load_os
     if [ "$FAMILY" = "alpine" ]; then
-        [ -x "$BOOT_SCRIPT" ] && "$BOOT_SCRIPT" >/dev/null 2>&1
+        start_alpine
     elif systemd_running; then
         systemctl enable docker.service containerd.service >/dev/null 2>&1
         systemctl restart docker.service >/dev/null 2>&1

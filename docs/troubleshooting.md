@@ -189,6 +189,15 @@ rc-status
 
 O `[boot] command` exige um WSL recente (`wsl --update`).
 
+**`ERROR: networking failed to start` / `cannot start docker as networking would not start`:** o serviço `docker` do OpenRC depende do `networking`, que precisa do `/etc/network/interfaces`. Crie o arquivo só com o loopback (a rede de verdade é do WSL) e suba de novo:
+
+```sh
+printf 'auto lo\niface lo inet loopback\n' | sudo tee -a /etc/network/interfaces
+sudo /usr/local/sbin/wsl-docker-boot.sh
+```
+
+**`failed to acquire lock: Bad file descriptor`:** sobrou estado de uma tentativa anterior. Limpe e suba de novo: `sudo rm -rf /run/openrc && sudo /usr/local/sbin/wsl-docker-boot.sh`, ou rode `wsl --terminate <distro>` e abra a distro de novo.
+
 ### `apt-get update` falha com "Release file ... is not valid yet"
 
 O relógio da distro atrasou (acontece depois de suspender o notebook). Sincronize:
@@ -281,6 +290,17 @@ Rode `wsl --shutdown` para aplicar.
 ---
 
 ## Mover e importar distros
+
+### `ERROR_SHARING_VIOLATION` ao mover ("O arquivo já está sendo usado por outro processo")
+
+O `wsl --manage --move` só funciona com o WSL inteiro desligado. Desligar só a distro (`wsl --terminate`) não libera o disco virtual. Rode:
+
+```powershell
+wsl --shutdown
+wsl --manage <distro> --move D:\WSL\<distro>
+```
+
+O script faz isso sozinho quando nenhuma outra distro sua está rodando. Se houver outras, ele pergunta antes de desligá-las (o padrão é "Não") ou move por exportar/importar.
 
 ### "Espaço insuficiente" ao mover
 
