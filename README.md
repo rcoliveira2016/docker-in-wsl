@@ -22,6 +22,7 @@ Instale e gerencie o **Docker Engine** direto numa distro Linux do **WSL2**, sem
 - [Por que usar Docker no WSL sem o Docker Desktop](#por-que-usar-docker-no-wsl-sem-o-docker-desktop)
 - [Pré-requisitos](#pré-requisitos)
 - [Instalação rápida](#instalação-rápida)
+- [Alpine: terminal completo (recomendado)](#alpine-terminal-completo-recomendado)
 - [Instalação manual](#instalação-manual)
 - [Instalar ou mover uma distro para outro disco](#instalar-ou-mover-uma-distro-para-outro-disco)
 - [Usando o Docker depois de instalado](#usando-o-docker-depois-de-instalado)
@@ -76,7 +77,7 @@ Se você abrir o script no Windows PowerShell 5.1 e o PowerShell 7 estiver insta
 2. Habilita a **Plataforma de Máquina Virtual**, se ainda não estiver habilitada. O recurso antigo **Subsistema do Windows para Linux** só é habilitado quando o WSL da Microsoft Store não está instalado.
 3. Só pede para reiniciar quando um desses recursos acabou de ser habilitado. Nesse caso, **ele pergunta antes** (o padrão é "Não"). Se você recusar, nada é reiniciado: reinicie quando quiser e rode o script de novo, que ele pergunta se quer continuar de onde parou. No modo `-Silent`, ele nunca reinicia e termina com o código `3010`.
 4. Confere a versão do WSL e só roda `wsl --update` se faltar algum recurso que o script usa. Como atualizar o WSL desliga as distros que estão rodando, ele pergunta antes quando alguma estiver ligada; no modo `-Silent`, não atualiza nesse caso. Também define o WSL2 como padrão. Toda distro criada, importada ou movida pelo script é WSL2.
-5. Instala a distro escolhida (Ubuntu, Debian ou Alpine) no disco que você escolher, com o seu usuário Linux.
+5. Instala a distro escolhida (Ubuntu, Debian ou Alpine) no disco que você escolher, com o seu usuário Linux. No Alpine, ele pergunta também se você quer o [terminal completo](#alpine-terminal-completo-recomendado) e se quer definir a senha do root.
 6. Habilita o systemd no `/etc/wsl.conf` (no Alpine, configura a inicialização automática pelo OpenRC).
 7. Instala o **Docker Engine pelo repositório oficial**, o **Compose v2** e o **Buildx**.
 8. Coloca o seu usuário no grupo `docker`, para não precisar de `sudo`.
@@ -89,6 +90,9 @@ Ele pode ser executado várias vezes sem quebrar nada: o que já está feito é 
 ```powershell
 # Nova distro Ubuntu em D:\WSL\Ubuntu, sem perguntas
 .\docker-wsl.ps1 -Acao Instalar -Distro Ubuntu -Local D:\WSL -Silent
+
+# Alpine em D:\WSL\Alpine, já com o terminal completo
+.\docker-wsl.ps1 -Acao Instalar -Distro Alpine -Local D:\WSL -Silent -TerminalCompleto
 
 # Docker numa distro que você já tem, movendo-a antes para o D:
 .\docker-wsl.ps1 -Acao InstalarExistente -Distro Ubuntu-24.04 -Local D:\WSL -Silent
@@ -112,11 +116,60 @@ Com o one-liner, passe os parâmetros assim:
 | `-Usuario` | Usuário Linux a criar. Padrão: o seu usuário do Windows em minúsculas. |
 | `-Mover` | Em `InstalarExistente`, move a distro para `-Local` antes de instalar. |
 | `-ComandoWindows` | Cria o comando `docker` no PowerShell/CMD do Windows. |
+| `-TerminalCompleto` | Só no Alpine: instala o [terminal completo](#alpine-terminal-completo-recomendado). Sem ele, o script pergunta; no `-Silent`, não instala. |
 | `-RemoverDados` | Em `Desinstalar`, apaga também imagens, containers e volumes. |
 | `-RemoverDistro` | Em `Desinstalar`, remove a distro inteira. |
 | `-Silent` | Não faz perguntas: usa os parâmetros informados ou os padrões. |
 
-No modo `-Silent`, a senha do usuário Linux não é definida. Defina depois com `wsl -d <distro> -u root passwd <usuario>` para poder usar o `sudo`.
+No modo `-Silent`, a senha do usuário Linux não é definida. Defina depois com `wsl -d <distro> -u root passwd <usuario>` para poder usar o `sudo`. A senha do root também não é pedida.
+
+## Alpine: terminal completo (recomendado)
+
+O Alpine é a distro mais leve, mas o minirootfs vem só com o shell básico do BusyBox (`ash`): não tem autocompletar com Tab, nem cores, nem um editor simples (só o `vi`), e vários comandos (`ls`, `grep`, `ps`, `sed`) são versões reduzidas. Para o dia a dia, **recomendamos instalar o terminal completo**. Ele deixa o Alpine com a mesma cara do Ubuntu no terminal.
+
+A escolha é sua. Ao escolher o Alpine, o script pergunta:
+
+```text
+  i  O Alpine vem só com o shell básico do BusyBox (ash): sem autocompletar com Tab, sem cores e sem um editor simples.
+  ?  Instalar o terminal completo: bash, autocompletar, prompt colorido e nano (recomendado)? [S/n]:
+  ?  Definir também a senha do root (para usar o "su")? [s/N]:
+```
+
+Aperte Enter na primeira pergunta para aceitar o recomendado. No modo `-Silent` não há perguntas: o terminal só é instalado com `-TerminalCompleto`.
+
+**O que entra:**
+
+| Pacote | Para quê |
+|---|---|
+| `bash`, `bash-completion` | Shell padrão do seu usuário, com autocompletar no Tab (inclusive dos comandos e argumentos do `docker`). |
+| `coreutils`, `findutils`, `grep`, `sed`, `procps-ng` | Versões GNU de `ls`, `find`, `grep`, `sed`, `ps`, `top` e `free`, iguais às do Ubuntu. |
+| `less`, `nano` | Paginador completo e um editor fácil (`EDITOR=nano`). |
+| `curl` | Downloads e testes de API. |
+| `tzdata` | O relógio da distro segue o fuso do Windows (sem ele, fica em UTC). |
+
+Também cria `/etc/bash/wsl-terminal.sh`, com prompt colorido no estilo do Ubuntu (`usuario@maquina:~/pasta$`; vermelho quando é root), histórico maior e os atalhos `ll` e `la`. O total fica em torno de 15 MB.
+
+**Já tenho um Alpine com Docker e quero o terminal completo:**
+
+```powershell
+.\docker-wsl.ps1 -Acao InstalarExistente -Distro <nome-da-distro> -TerminalCompleto
+```
+
+**Senha do root:** o minirootfs vem com o root sem senha e com um `su` que não funciona para usuários comuns (o BusyBox não tem permissão suid). O seu usuário já usa `sudo` com a senha dele, o que basta na maioria dos casos. Se quiser o `su`, responda **S** na pergunta: o script instala o `busybox-suid` e pede a senha do root. Para fazer depois:
+
+```powershell
+wsl -d <nome-da-distro> -u root apk add busybox-suid
+wsl -d <nome-da-distro> -u root passwd
+```
+
+**Manualmente**, dentro da distro como root:
+
+```sh
+apk add bash bash-completion coreutils findutils grep sed less nano curl procps-ng tzdata docker-bash-completion
+sed -i 's#^\(seu_usuario:.*:\)/bin/ash$#\1/bin/bash#' /etc/passwd
+```
+
+Feche o terminal e abra a distro de novo.
 
 ## Instalação manual
 
@@ -419,7 +472,7 @@ Funciona com Ubuntu, Debian e Alpine. O script detecta a arquitetura.
 ├── install.ps1             # instalador do one-liner: baixa e executa o docker-wsl.ps1
 ├── docker-wsl.ps1          # script principal (menu, preparação do Windows, instalação, mover, desinstalar)
 ├── scripts/
-│   └── wsl-docker.sh       # executado dentro da distro: status, usuário, systemd, instalação e remoção do Docker
+│   └── wsl-docker.sh       # executado dentro da distro: status, usuário, systemd, instalação e remoção do Docker, terminal do Alpine
 ├── docs/
 │   ├── troubleshooting.md  # solução de problemas detalhada
 │   └── roteiro-de-teste.md # casos de teste de ponta a ponta

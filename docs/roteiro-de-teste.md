@@ -205,13 +205,48 @@ Get-Help .\docker-wsl.ps1 -Full
 ### C3. Alpine em outro disco
 
 1. Opção **2** → Alpine → nome `Teste-Alpine` → pasta `D:\WSL\Teste-Alpine`.
+2. Em "Instalar o terminal completo...?", aperte Enter (padrão **Sim**).
+3. Em "Definir também a senha do root?", responda **S** e digite a senha duas vezes.
 
-**Esperado:** o script baixa o minirootfs oficial do Alpine, importa a distro e configura a inicialização pelo OpenRC.
+**Esperado:** o script baixa o minirootfs oficial do Alpine, importa a distro e configura a inicialização pelo OpenRC. Antes de continuar, o quadro "Vou fazer o seguinte" mostra `Terminal: completo` e `Senha do root: definir agora`. Aparecem as etapas "Definindo a senha do root" e "Instalando o terminal completo". Ao abrir a distro (`wsl -d Teste-Alpine`), o prompt fica colorido (`usuario@maquina:~$`), o Tab completa comandos e argumentos do `docker`, e `su -` aceita a senha do root.
 
 **Verificação:**
 
 ```powershell
-.\tests\verificar.ps1 -Distro Teste-Alpine -LocalEsperado D:\WSL\Teste-Alpine
+.\tests\verificar.ps1 -Distro Teste-Alpine -LocalEsperado D:\WSL\Teste-Alpine -TerminalCompleto -SenhaRoot
+```
+
+- [ ] Passou
+
+### C3b. Alpine sem o terminal completo
+
+1. Opção **2** → Alpine → nome `Teste-AlpineBasico` → pasta `D:\WSL\Teste-AlpineBasico`.
+2. Responda **N** ao terminal completo e Enter (Não) à senha do root.
+
+**Esperado:** as duas etapas opcionais não aparecem. O usuário continua com o `ash` (`wsl -d Teste-AlpineBasico -u root grep dev /etc/passwd` termina em `/bin/ash`), e o Docker funciona normalmente.
+
+**Verificação:**
+
+```powershell
+.\tests\verificar.ps1 -Distro Teste-AlpineBasico -LocalEsperado D:\WSL\Teste-AlpineBasico
+```
+
+- [ ] Passou
+
+### C3c. Alpine silencioso, com e sem o terminal completo
+
+```powershell
+.\docker-wsl.ps1 -Acao Instalar -Distro Alpine -Nome Teste-AlpineSilent -Local D:\WSL -Usuario dev -Silent -TerminalCompleto
+.\docker-wsl.ps1 -Acao Instalar -Distro Alpine -Nome Teste-AlpineSilent2 -Local D:\WSL -Usuario dev -Silent
+```
+
+**Esperado:** nenhuma pergunta. O primeiro instala o terminal completo; o segundo, não (sem `-TerminalCompleto`, o modo silencioso nunca instala). Em nenhum dos dois a senha do root é pedida.
+
+**Verificação:**
+
+```powershell
+.\tests\verificar.ps1 -Distro Teste-AlpineSilent -Usuario dev -TerminalCompleto
+.\tests\verificar.ps1 -Distro Teste-AlpineSilent2 -Usuario dev
 ```
 
 - [ ] Passou
@@ -578,6 +613,8 @@ Se você usou o C5, tire também `%LOCALAPPDATA%\docker-wsl\bin` do `PATH` do us
 | C1 Ubuntu no D: | | |
 | C2 Debian em D: | | |
 | C3 Alpine | | |
+| C3b Alpine sem terminal completo | | |
+| C3c Alpine silencioso | | |
 | C4 Validações | | |
 | C5 Comando Windows | | |
 | C6 Silencioso | | |

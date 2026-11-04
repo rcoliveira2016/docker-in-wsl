@@ -1,11 +1,13 @@
 #!/bin/sh
 # Executado dentro da distro pelo docker-wsl.ps1. Uso: sh wsl-docker.sh <comando> [argumentos]
-# Comandos: status | info | user <nome> | systemd | install <usuario> | start | data | uninstall [--purge]
+# Comandos: status | info | user <nome> | systemd | install <usuario> | start | data | uninstall [--purge] | terminal <usuario> | su
 
 set -u
 
 WSL_CONF=/etc/wsl.conf
 BOOT_SCRIPT=/usr/local/sbin/wsl-docker-boot.sh
+TERMINAL_CONF=/etc/bash/wsl-terminal.sh
+TERMINAL_PKGS="bash bash-completion coreutils findutils grep sed less nano curl procps-ng tzdata"
 
 log()  { printf '    %s\n' "$*"; }
 fail() { printf '    ERRO: %s\n' "$*" >&2; exit 1; }
@@ -202,6 +204,9 @@ install_alpine() {
     apk update || fail "falha no apk update. Verifique a conexão com a internet."
     log "Instalando Docker Engine, Compose v2 e Buildx..."
     apk add docker docker-cli-compose docker-cli-buildx openrc || fail "falha ao instalar os pacotes do Docker."
+    if apk info -e bash-completion >/dev/null 2>&1; then
+        apk add docker-bash-completion >/dev/null 2>&1 && log "Autocompletar do docker instalado para o bash."
+    fi
     rc-update add docker default >/dev/null 2>&1
     # O serviço docker do OpenRC depende do "networking", que falha sem /etc/network/interfaces.
     if ! grep -Eqs '^[[:space:]]*iface[[:space:]]+lo([[:space:]]|$)' /etc/network/interfaces; then
@@ -339,7 +344,9 @@ cmd_uninstall() {
             rc-service docker stop >/dev/null 2>&1
             rc-update del docker default >/dev/null 2>&1
             log "Removendo os pacotes do Docker..."
-            apk del docker docker-cli-compose docker-cli-buildx >/dev/null 2>&1 || fail "falha ao remover os pacotes."
+            pkgs="docker docker-cli-compose docker-cli-buildx"
+            apk info -e docker-bash-completion >/dev/null 2>&1 && pkgs="$pkgs docker-bash-completion"
+            apk del $pkgs >/dev/null 2>&1 || fail "falha ao remover os pacotes."
             rm -f "$BOOT_SCRIPT"
             ini_del "$WSL_CONF" boot command
             ;;
@@ -350,6 +357,70 @@ cmd_uninstall() {
         rm -rf /var/lib/docker /var/lib/containerd
     fi
     log "Docker removido."
+}
+
+cmd_su() {
+    require_root
+    load_os
+    [ "$FAMILY" = "alpine" ] || return 0
+    su_path=$(command -v su 2>/dev/null)
+    if [ -n "$su_path" ] && [ -u "$(readlink -f "$su_path")" ]; then
+        log "O su já está pronto para uso."
+        return 0
+    fi
+    log "Instalando o busybox-suid, sem ele o su do Alpine não funciona..."
+    apk add busybox-suid >/dev/null || fail "não consegui instalar o busybox-suid."
+    log "su habilitado."
+}
+
+set_login_shell() {
+    name=$1; shell=$2
+    current=$(awk -F: -v u="$name" '$1 == u { print $7 }' /etc/passwd)
+    case "$current" in
+        "$shell") return 0 ;;
+        ""|/bin/sh|/bin/ash) ;;
+        *) log "O usuário '$name' usa $current; mantive o shell dele."; return 0 ;;
+    esac
+    awk -F: -v OFS=: -v u="$name" -v s="$shell" '$1 == u { $7 = s } { print }' /etc/passwd > /etc/passwd.tmp &&
+        cat /etc/passwd.tmp > /etc/passwd && rm -f /etc/passwd.tmp
+    log "Shell do usuário '$name': $shell"
+}
+
+cmd_terminal() {
+    require_root
+    load_os
+    user=${1:-}
+    [ "$FAMILY" = "alpine" ] || fail "o terminal completo é só para o Alpine; Ubuntu e Debian já vêm com ele."
+    pkgs=$TERMINAL_PKGS
+    apk info -e docker-cli >/dev/null 2>&1 && pkgs="$pkgs docker-bash-completion"
+    log "Atualizando a lista de pacotes..."
+    apk update -q >/dev/null || fail "falha no apk update. Verifique a conexão com a internet."
+    log "Instalando: $pkgs"
+    apk add $pkgs || fail "falha ao instalar os pacotes do terminal."
+    mkdir -p "$(dirname "$TERMINAL_CONF")"
+    cat > "$TERMINAL_CONF" <<'EOF'
+if [ "$EUID" -eq 0 ]; then _cor='1;31'; else _cor='1;32'; fi
+PS1="\[\e[${_cor}m\]\u@\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\\$ "
+unset _cor
+
+export EDITOR=nano
+export LESS=-R
+HISTSIZE=5000
+HISTFILESIZE=10000
+HISTCONTROL=ignoreboth
+shopt -s histappend checkwinsize
+
+alias ls='ls --color=auto'
+alias ll='ls -alF'
+alias la='ls -A'
+alias grep='grep --color=auto'
+EOF
+    chmod 0644 "$TERMINAL_CONF"
+    log "Prompt colorido, histórico e atalhos (ll, la) em $TERMINAL_CONF."
+    if [ -n "$user" ] && id "$user" >/dev/null 2>&1; then
+        set_login_shell "$user" /bin/bash
+    fi
+    echo "TERMINAL=1"
 }
 
 command=${1:-}
@@ -363,5 +434,7 @@ case "$command" in
     start)     cmd_start ;;
     data)      cmd_data ;;
     uninstall) cmd_uninstall "$@" ;;
-    *) fail "comando desconhecido: '$command'. Use: info, status, user, systemd, install, start, data, uninstall." ;;
+    terminal)  cmd_terminal "$@" ;;
+    su)        cmd_su ;;
+    *) fail "comando desconhecido: '$command'. Use: info, status, user, systemd, install, start, data, uninstall, terminal, su." ;;
 esac

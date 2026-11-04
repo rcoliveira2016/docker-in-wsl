@@ -30,6 +30,10 @@
 .PARAMETER ComandoWindows
     Cria o comando "docker" no PowerShell/CMD do Windows apontando para a distro.
 
+.PARAMETER TerminalCompleto
+    Só no Alpine: instala bash, autocompletar, prompt colorido, nano e as versões GNU dos comandos básicos.
+    Sem o parâmetro, o script pergunta (no modo -Silent, não instala).
+
 .PARAMETER RemoverDados
     Na desinstalação, apaga também imagens, containers e volumes.
 
@@ -64,6 +68,7 @@ param(
     [string]$Usuario,
     [switch]$Mover,
     [switch]$ComandoWindows,
+    [switch]$TerminalCompleto,
     [switch]$RemoverDados,
     [switch]$RemoverDistro,
     [switch]$Silent,
@@ -1054,15 +1059,61 @@ function Set-SenhaUsuario {
     param([string]$Nome, [string]$Usuario)
     if ($Silent) {
         Write-Aviso "Senha não definida (modo silencioso). Para usar o sudo, defina depois com: wsl -d $Nome -u root passwd $Usuario"
-        return
+        return $false
     }
-    Write-Info "Defina a senha do usuário '$Usuario' no Linux (ela é pedida pelo sudo; os caracteres não aparecem ao digitar)."
+    if ($Usuario -eq 'root') {
+        Write-Info 'Defina a senha do root (ela é pedida pelo "su"; os caracteres não aparecem ao digitar).'
+    } else {
+        Write-Info "Defina a senha do usuário '$Usuario' no Linux (ela é pedida pelo sudo; os caracteres não aparecem ao digitar)."
+    }
     for ($tentativa = 1; $tentativa -le 3; $tentativa++) {
         $r = Invoke-Wsl -Argumentos @('-d', $Nome, '-u', 'root', '--exec', 'passwd', $Usuario) -Interativo
-        if ($r.Codigo -eq 0) { Write-Ok 'Senha definida.'; return }
+        if ($r.Codigo -eq 0) { Write-Ok 'Senha definida.'; return $true }
         Write-Aviso 'As senhas não conferem ou são inválidas. Tente de novo.'
     }
     Write-Aviso "Senha não definida. Defina depois com: wsl -d $Nome -u root passwd $Usuario"
+    return $false
+}
+
+function Set-SenhaRoot {
+    param([string]$Nome)
+    Write-Etapa 'Definindo a senha do root'
+    $r = Invoke-ScriptNaDistro -Nome $Nome -Comando 'su'
+    if ($r.Codigo -ne 0) { Write-Aviso "O su pode não funcionar. Para corrigir, rode: wsl -d $Nome -u root apk add busybox-suid" }
+    if (Set-SenhaUsuario -Nome $Nome -Usuario 'root') { Add-Resumo 'Senha do root definida (use "su" para virar root)' }
+}
+
+function Read-OpcoesAlpine {
+    $opcoes = @{ Terminal = [bool]$TerminalCompleto; SenhaRoot = $false }
+    if ($Silent) { return $opcoes }
+    Write-Host ''
+    Write-Info 'O Alpine vem só com o shell básico do BusyBox (ash): sem autocompletar com Tab, sem cores e sem um editor simples.'
+    if (-not $opcoes.Terminal) {
+        $opcoes.Terminal = Read-SimNao 'Instalar o terminal completo: bash, autocompletar, prompt colorido e nano (recomendado)?' $true
+    }
+    $opcoes.SenhaRoot = Read-SimNao 'Definir também a senha do root (para usar o "su")?' $false
+    return $opcoes
+}
+
+function Install-TerminalAlpine {
+    param([string]$Nome, [string]$Usuario)
+    Write-Etapa 'Instalando o terminal completo (bash, autocompletar, prompt colorido, nano)'
+    $argumentos = @()
+    if ($Usuario) { $argumentos = @($Usuario) }
+    $r = Invoke-ScriptNaDistro -Nome $Nome -Comando 'terminal' -Argumentos $argumentos
+    if ($r.Codigo -ne 0) {
+        Write-Aviso "O terminal completo não foi instalado; o Docker segue normalmente. Para tentar de novo: .\docker-wsl.ps1 -Acao InstalarExistente -Distro $Nome -TerminalCompleto"
+        return
+    }
+    Write-Ok 'Terminal completo instalado. Ele vale a partir do próximo terminal aberto na distro.'
+    Add-Resumo 'Terminal completo no Alpine (bash, autocompletar, prompt colorido, nano)'
+}
+
+function Test-AvisoTerminalCompleto {
+    param([string]$Familia)
+    if ($TerminalCompleto -and $Familia -ne 'alpine') {
+        Write-Aviso '-TerminalCompleto vale só para o Alpine; Ubuntu e Debian já vêm com o bash completo.'
+    }
 }
 
 function New-UsuarioLinux {
@@ -1087,7 +1138,7 @@ function New-UsuarioLinux {
     } else {
         Write-Aviso "Não consegui confirmar o usuário padrão. Se a distro abrir como root, rode: wsl --manage $Nome --set-default-user $Usuario"
     }
-    Set-SenhaUsuario -Nome $Nome -Usuario $Usuario
+    [void](Set-SenhaUsuario -Nome $Nome -Usuario $Usuario)
     Add-Resumo "Usuário Linux '$Usuario' configurado como padrão"
 }
 
@@ -1267,7 +1318,12 @@ function Repair-DockerExistente {
     Write-Info "A distro '$Nome' já existe; vou só garantir que o Docker esteja instalado e funcionando nela."
     $status = Get-StatusDocker -Info (Get-Distro -Nome $Nome)
     if ($status.Versao -eq 1) { throw "A distro '$Nome' está em WSL1. Converta com: wsl --set-version $Nome 2" }
-    Start-Etapas 4
+    Test-AvisoTerminalCompleto -Familia $status.Familia
+    $terminal = ($TerminalCompleto -and $status.Familia -eq 'alpine')
+    $total = 4
+    if ($terminal) { $total++ }
+    Start-Etapas $total
+    if ($terminal) { Install-TerminalAlpine -Nome $Nome -Usuario $status.Usuario }
     Install-DockerNaDistro -Nome $Nome -Usuario $status.Usuario
     $ok = Test-DockerHelloWorld -Nome $Nome -Usuario $status.Usuario
     Show-Resumo -Nome $Nome -Usuario $status.Usuario -Sucesso $ok
@@ -1317,6 +1373,8 @@ function Invoke-InstalarNova {
     if (-not $usuarioPadrao) { $usuarioPadrao = Get-UsuarioSugerido }
     $usuarioLinux = Read-Texto -Pergunta 'Usuário do Linux' -Padrao $usuarioPadrao -Validar { param($r) Test-NomeUsuario $r }
     if (Test-NomeUsuario $usuarioLinux) { throw (Test-NomeUsuario $usuarioLinux) }
+    $alpine = @{ Terminal = $false; SenhaRoot = $false }
+    if ($base -eq 'Alpine') { $alpine = Read-OpcoesAlpine } else { Test-AvisoTerminalCompleto -Familia 'debian' }
     $comandoWin = [bool]$ComandoWindows
     if (-not $comandoWin) { $comandoWin = Read-SimNao 'Quer usar o comando "docker" direto no PowerShell/CMD do Windows?' $false }
 
@@ -1327,16 +1385,24 @@ function Invoke-InstalarNova {
     Write-Host "    Distro:        $base, com o nome '$nomeDistro'"
     Write-Host "    Armazenamento: $localTexto"
     Write-Host "    Usuário Linux: $usuarioLinux"
+    if ($base -eq 'Alpine') {
+        Write-Host "    Terminal:      $(if ($alpine.Terminal) { 'completo (bash, autocompletar, prompt colorido, nano)' } else { 'básico (ash do BusyBox)' })"
+        Write-Host "    Senha do root: $(if ($alpine.SenhaRoot) { 'definir agora' } else { 'não definir' })"
+    }
     if (-not (Read-SimNao 'Continuar?' $true)) { Write-Info 'Instalação cancelada.'; return }
 
     $total = 6
-    if ($comandoWin) { $total = 7 }
+    if ($comandoWin) { $total++ }
+    if ($alpine.Terminal) { $total++ }
+    if ($alpine.SenhaRoot) { $total++ }
     Start-Etapas $total
     Write-Etapa "Instalando a distro $base"
     $nomeDistro = Install-DistroNova -Base $base -Nome $nomeDistro -Pasta $pasta
     Add-Resumo "Distro '$nomeDistro' criada em $((Get-Distro -Nome $nomeDistro).Pasta)"
     Write-Etapa "Criando o usuário '$usuarioLinux'"
     New-UsuarioLinux -Nome $nomeDistro -Usuario $usuarioLinux
+    if ($alpine.SenhaRoot) { Set-SenhaRoot -Nome $nomeDistro }
+    if ($alpine.Terminal) { Install-TerminalAlpine -Nome $nomeDistro -Usuario $usuarioLinux }
     Install-DockerNaDistro -Nome $nomeDistro -Usuario $usuarioLinux
     $ok = Test-DockerHelloWorld -Nome $nomeDistro -Usuario $usuarioLinux
     if ($comandoWin) { Enable-ComandoWindows -Nome $nomeDistro }
@@ -1383,6 +1449,8 @@ function Invoke-InstalarExistente {
         $usuarioLinux = Read-Texto -Pergunta 'Usuário do Linux' -Padrao $sugerido -Validar { param($r) Test-NomeUsuario $r }
         $criarUsuario = $true
     }
+    $alpine = @{ Terminal = $false; SenhaRoot = $false }
+    if ($d.Familia -eq 'alpine') { $alpine = Read-OpcoesAlpine } else { Test-AvisoTerminalCompleto -Familia $d.Familia }
     $comandoWin = [bool]$ComandoWindows
     if (-not $comandoWin) { $comandoWin = Read-SimNao 'Quer usar o comando "docker" direto no PowerShell/CMD do Windows?' $false }
 
@@ -1390,6 +1458,8 @@ function Invoke-InstalarExistente {
     if ($converter) { $total++ }
     if ($destino) { $total++ }
     if ($criarUsuario) { $total++ }
+    if ($alpine.SenhaRoot) { $total++ }
+    if ($alpine.Terminal) { $total++ }
     if ($comandoWin) { $total++ }
     Start-Etapas $total
 
@@ -1408,6 +1478,8 @@ function Invoke-InstalarExistente {
         Write-Etapa "Criando o usuário '$usuarioLinux'"
         New-UsuarioLinux -Nome $d.Nome -Usuario $usuarioLinux
     }
+    if ($alpine.SenhaRoot) { Set-SenhaRoot -Nome $d.Nome }
+    if ($alpine.Terminal) { Install-TerminalAlpine -Nome $d.Nome -Usuario $usuarioLinux }
 
     Install-DockerNaDistro -Nome $d.Nome -Usuario $usuarioLinux
     $ok = Test-DockerHelloWorld -Nome $d.Nome -Usuario $usuarioLinux
@@ -1485,14 +1557,15 @@ function Invoke-Desinstalar {
 
 function Get-ParametrosAtuais {
     return @{
-        Acao           = $Script:AcaoAtual
-        Distro         = $Script:Distro
-        Nome           = $Script:Nome
-        Local          = $Script:Local
-        Usuario        = $Script:Usuario
-        Mover          = [bool]$Script:Mover
-        ComandoWindows = [bool]$Script:ComandoWindows
-        Silent         = [bool]$Script:Silent
+        Acao             = $Script:AcaoAtual
+        Distro           = $Script:Distro
+        Nome             = $Script:Nome
+        Local            = $Script:Local
+        Usuario          = $Script:Usuario
+        Mover            = [bool]$Script:Mover
+        ComandoWindows   = [bool]$Script:ComandoWindows
+        TerminalCompleto = [bool]$Script:TerminalCompleto
+        Silent           = [bool]$Script:Silent
     }
 }
 
@@ -1505,6 +1578,7 @@ function Restore-Parametros {
     if ($Estado.Usuario) { $Script:Usuario = "$($Estado.Usuario)" }
     $Script:Mover = [bool]$Estado.Mover
     $Script:ComandoWindows = [bool]$Estado.ComandoWindows
+    $Script:TerminalCompleto = [bool]$Estado.TerminalCompleto
     $Script:Silent = [bool]$Estado.Silent
 }
 

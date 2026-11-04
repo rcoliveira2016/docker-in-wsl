@@ -20,6 +20,12 @@
 .PARAMETER SemReinicio
     Não reinicia a distro para testar se o Docker sobe sozinho.
 
+.PARAMETER TerminalCompleto
+    No Alpine, verifica também o terminal completo (bash, autocompletar, prompt colorido).
+
+.PARAMETER SenhaRoot
+    Verifica também se o root tem senha e se o su funciona para usuários comuns.
+
 .EXAMPLE
     .\tests\verificar.ps1 -Distro Teste-Debian -LocalEsperado D:\WSL\Teste-Debian -Usuario ramon
 #>
@@ -30,7 +36,9 @@ param(
     [string]$Usuario,
     [switch]$SemDocker,
     [switch]$ComandoWindows,
-    [switch]$SemReinicio
+    [switch]$SemReinicio,
+    [switch]$TerminalCompleto,
+    [switch]$SenhaRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -114,6 +122,30 @@ if ($alpine) {
     Add-Resultado 'systemd=true no /etc/wsl.conf' ($conf.Codigo -eq 0)
     $pid1 = (Invoke-Distro 'cat /proc/1/comm').Saida
     Add-Resultado 'systemd rodando como PID 1' ($pid1 -eq 'systemd') "PID 1: $pid1"
+}
+
+if ($TerminalCompleto) {
+    if (-not $alpine) {
+        Add-Resultado 'Terminal completo só existe no Alpine' $false $os.Saida
+    } else {
+        $shell = (Invoke-Distro "awk -F: -v u=$padrao '`$1 == u { print `$7 }' /etc/passwd" 'root').Saida
+        Add-Resultado "bash é o shell de '$padrao'" ($shell -eq '/bin/bash') $shell
+        $pacotes = Invoke-Distro 'for p in bash bash-completion coreutils less nano tzdata; do apk info -e $p >/dev/null || { echo $p; exit 1; }; done' 'root'
+        Add-Resultado 'Pacotes do terminal instalados' ($pacotes.Codigo -eq 0) $pacotes.Saida
+        $perfil = Invoke-Distro 'bash -lic ''alias ll >/dev/null && case "$PS1" in *1\;3[12]m*) exit 0 ;; esac; exit 1'''
+        Add-Resultado 'Prompt colorido e atalho ll no bash' ($perfil.Codigo -eq 0) $perfil.Saida
+        if (-not $SemDocker) {
+            $completar = Invoke-Distro 'apk info -e docker-bash-completion' 'root'
+            Add-Resultado 'Autocompletar do docker no bash' ($completar.Codigo -eq 0)
+        }
+    }
+}
+
+if ($SenhaRoot) {
+    $hash = Invoke-Distro 'grep "^root:" /etc/shadow | cut -d: -f2 | grep -q ''^[$]''' 'root'
+    Add-Resultado 'Root com senha definida' ($hash.Codigo -eq 0)
+    $su = Invoke-Distro 'test -u "$(readlink -f "$(command -v su)")"' 'root'
+    Add-Resultado 'su com permissão suid (funciona para usuários comuns)' ($su.Codigo -eq 0)
 }
 
 if ($SemDocker) {
